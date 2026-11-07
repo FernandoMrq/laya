@@ -1067,10 +1067,13 @@ fn apply_execution_provider(
         LayaExecutionProvider::Cpu => Ok(builder),
 
         LayaExecutionProvider::Cuda => {
+            // `error_on_failure`: a CUDA request whose provider cannot register (a missing
+            // provider library or CUDA DLL) is an error, never a silent run on the CPU. Nodes
+            // ONNX Runtime places on the CPU on purpose (shape bookkeeping) are unaffected.
             #[cfg(feature = "cuda")]
             {
                 builder
-                    .with_execution_providers([ort::ep::CUDA::default().build()])
+                    .with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])
                     .map_err(onnx_err)
             }
             #[cfg(not(feature = "cuda"))]
@@ -1088,7 +1091,9 @@ fn apply_execution_provider(
             #[cfg(feature = "directml")]
             {
                 builder
-                    .with_execution_providers([ort::ep::DirectML::default().build()])
+                    .with_execution_providers([ort::ep::DirectML::default()
+                        .build()
+                        .error_on_failure()])
                     .map_err(onnx_err)
             }
             #[cfg(not(feature = "directml"))]
