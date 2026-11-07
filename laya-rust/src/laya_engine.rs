@@ -31,6 +31,7 @@ use crate::questions::{Question, QuestionSet};
 use crate::sequence_builder::SequenceBuilder;
 use crate::tokenization::{HfTokenizer, LayaTokenizer};
 use indexmap::IndexMap;
+use ort::environment::Environment;
 use ort::session::Session;
 use ort::session::builder::SessionBuilder;
 use ort::value::{DynValue, Tensor, TensorElementType, ValueType};
@@ -998,8 +999,31 @@ fn validate_encoder(
     Ok(())
 }
 
-fn build_session(options: &LayaOptions, model_path: &Path) -> Result<Session> {
-    let mut builder = Session::builder().map_err(onnx_err)?;
+/// The process default environment, built on first use when [`LayaOptions::environment`] is
+/// `None`. ONNX Runtime refuses a second environment, so it is built once and shared.
+fn default_environment() -> Result<Environment> {
+    static DEFAULT: Mutex<Option<Environment>> = Mutex::new(None);
+    let mut slot = DEFAULT
+        .lock()
+        .map_err(|_| LayaError::Onnx("ONNX Runtime environment lock poisoned".to_string()))?;
+    if let Some(environment) = slot.as_ref() {
+        return Ok(environment.clone());
+    }
+    let environment = ort::init().with_name("laya").build().map_err(onnx_err)?;
+    *slot = Some(environment.clone());
+    Ok(environment)
+}
+
+/// Builds an ONNX Runtime session the way [`LayaEngine`] does: the environment from
+/// `options` (or the process default), its thread counts and its execution provider. Public so
+/// a host can check, with any small model, that its runtime setup works before loading a
+/// checkpoint.
+pub fn build_session(options: &LayaOptions, model_path: &Path) -> Result<Session> {
+    let environment = match &options.environment {
+        Some(environment) => environment.clone(),
+        None => default_environment()?,
+    };
+    let mut builder = Session::builder(&environment).map_err(onnx_err)?;
     if let Some(intra) = options.intra_op_threads {
         builder = builder
             .with_intra_threads(intra as usize)

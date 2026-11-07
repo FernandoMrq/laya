@@ -108,6 +108,11 @@ pub struct LayaOptions {
     /// [`crate::lang_temperatures::resolve_lang_temperatures`] for the rules and the errors. A
     /// router passes it to every engine it builds.
     pub lang_temperatures: crate::lang_temperatures::LangTemperatureTable,
+    /// The ONNX Runtime environment sessions are created under. `None` uses the process
+    /// default, built on first use. ONNX Runtime allows one environment per process, so a host
+    /// that owns it (for example a `load-dynamic` build that loads a pinned runtime) passes its
+    /// own here and Laya shares it.
+    pub environment: Option<ort::environment::Environment>,
 }
 
 impl std::fmt::Debug for LayaOptions {
@@ -128,6 +133,7 @@ impl std::fmt::Debug for LayaOptions {
             .field("cache_directory", &self.cache_directory)
             .field("download_progress", &self.download_progress.is_some())
             .field("lang_temperatures", &self.lang_temperatures)
+            .field("environment", &self.environment.is_some())
             .finish()
     }
 }
@@ -147,6 +153,7 @@ impl Default for LayaOptions {
             cache_directory: None,
             download_progress: None,
             lang_temperatures: Vec::new(),
+            environment: None,
         }
     }
 }

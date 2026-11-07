@@ -34,9 +34,11 @@ ureq = { version = "3", optional = true }
 # with `ort-sys`'s prebuilt ONNX Runtime binaries (/MD) on Windows. `esaxx_fast` only accelerates
 # the BPE trainer/encoder; dropping it changes performance, not tokenization output.
 tokenizers = { version = "0.23", default-features = false, features = ["onig", "progressbar"] }
-# `ort`: latest 2.x (still pre-1.0 upstream); default features include `download-binaries`, which
-# fetches a prebuilt CPU ONNX Runtime at build time so no system install is required.
-ort = "2.0.0-rc.13"
+# `ort`: 2.0.0-rc.15 (still pre-1.0 upstream), sessions take an explicit `Environment`. The
+# runtime source is chosen with this crate's features: `ort-binaries` (default) fetches a
+# prebuilt CPU ONNX Runtime at build time so no system install is required; `load-dynamic`
+# loads a runtime the host provides at run time (pass it through `LayaOptions::environment`).
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std"] }
 # Routing port (`language_detection.rs`): Python's `str.isalpha()` is Unicode general category
 # L* only, which `char::is_alphabetic` does not match (it also accepts combining marks). This
 # crate gives a direct category lookup instead of hand-rolling Unicode tables.
@@ -60,8 +62,11 @@ tempfile = "3"
 [features]
 # Opt-in artifact download (HuggingFace Hub), via `ureq` (TLS through its default `rustls`
 # feature, so no system OpenSSL is needed). On by default.
-default = ["download"]
+default = ["download", "ort-binaries"]
 download = ["dep:ureq"]
+# Where ONNX Runtime comes from (see the `ort` dependency above).
+ort-binaries = ["ort/download-binaries", "ort/copy-dylibs", "ort/tls-native"]
+load-dynamic = ["ort/load-dynamic"]
 # GPU execution providers, forwarded to `ort`'s own features of the same name.
 cuda = ["ort/cuda"]
 directml = ["ort/directml"]
