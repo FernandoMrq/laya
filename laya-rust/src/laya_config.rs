@@ -347,6 +347,18 @@ pub(crate) fn python_text_mode(text: String) -> String {
 }
 
 impl LayaConfig {
+    /// Replace the checkpoint's calibration with per-type temperatures `[choice, score, noul]`
+    /// and drop every per-option bucket, as the Laya server does for a refit calibration
+    /// (`agent.temperature = ...; agent.temperature_by_options = {}`). See
+    /// [`crate::temperatures_file`].
+    pub fn replace_temperatures(&mut self, temperatures: [f64; 3]) {
+        self.temperature = temperatures.to_vec();
+        self.temperature_raw = temperatures.to_vec();
+        self.temperature_by_options.clear();
+        self.temperature_by_options_raw.clear();
+        self.clamped_temperatures.clear();
+    }
+
     /// Read a config from a `rl_agent_config.json` file.
     #[track_caller]
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {

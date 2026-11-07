@@ -63,6 +63,7 @@ mod python_json_reader;
 pub mod question_json;
 pub mod questions;
 pub mod sequence_builder;
+pub mod temperatures_file;
 pub mod tokenization;
 
 pub use answers::{

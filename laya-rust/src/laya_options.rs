@@ -113,6 +113,12 @@ pub struct LayaOptions {
     /// that owns it (for example a `load-dynamic` build that loads a pinned runtime) passes its
     /// own here and Laya shares it.
     pub environment: Option<ort::environment::Environment>,
+    /// Per-type temperatures `[choice, score, noul]` that replace the checkpoint's calibration
+    /// and drop its per-option buckets (the server's refit calibration). `None` uses the
+    /// artifact directory's `temperatures.json` when it says it replaces the calibration, else
+    /// the checkpoint's own. Each value must lie in `[0.5, 5.0]`; see
+    /// [`crate::temperatures_file`].
+    pub temperatures: Option<[f64; 3]>,
 }
 
 impl std::fmt::Debug for LayaOptions {
@@ -134,6 +140,7 @@ impl std::fmt::Debug for LayaOptions {
             .field("download_progress", &self.download_progress.is_some())
             .field("lang_temperatures", &self.lang_temperatures)
             .field("environment", &self.environment.is_some())
+            .field("temperatures", &self.temperatures)
             .finish()
     }
 }
@@ -154,6 +161,7 @@ impl Default for LayaOptions {
             download_progress: None,
             lang_temperatures: Vec::new(),
             environment: None,
+            temperatures: None,
         }
     }
 }

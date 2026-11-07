@@ -135,9 +135,13 @@ impl LayaEngine {
     #[track_caller]
     pub fn create(options: LayaOptions) -> Result<Self> {
         let artifacts = ModelArtifacts::resolve(&options)?;
-        let (config, mut deferred) =
+        let (mut config, mut deferred) =
             LayaConfig::load_deferred(&artifacts.config_path, &options.lang_temperatures)?;
         let lang_temperatures = std::mem::take(&mut deferred.lang_temperatures);
+        if let Some(temperatures) = replacement_temperatures(&options, &artifacts.directory)? {
+            config.replace_temperatures(temperatures);
+            deferred.short_temperature = None;
+        }
 
         if let Some(expected_checkpoint) = artifacts.checkpoint {
             validate_encoder(
@@ -974,6 +978,15 @@ fn build_answer(question: &Question, p: &[f64], action: ActionInfo) -> Answer {
     }
 }
 
+/// The calibration that replaces the checkpoint's: [`LayaOptions::temperatures`] when set, else
+/// the artifact directory's `temperatures.json` when it says it replaces it, else none.
+fn replacement_temperatures(options: &LayaOptions, directory: &Path) -> Result<Option<[f64; 3]>> {
+    match options.temperatures {
+        Some(temperatures) => crate::temperatures_file::check(temperatures).map(Some),
+        None => crate::temperatures_file::read(directory),
+    }
+}
+
 fn validate_encoder(
     actual_encoder: Option<&str>,
     checkpoint: LayaCheckpoint,
@@ -1107,6 +1120,52 @@ fn onnx_err(e: impl std::fmt::Display) -> LayaError {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_option_wins_over_the_file_and_the_file_over_the_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = |temperatures| LayaOptions {
+            temperatures,
+            ..LayaOptions::default()
+        };
+        assert_eq!(
+            replacement_temperatures(&options(None), dir.path()).unwrap(),
+            None
+        );
+
+        std::fs::write(
+            dir.path().join(crate::temperatures_file::FILE_NAME),
+            r#"{"temperature": [2.23, 1.69, 5.0], "replaces_config_calibration": true}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            replacement_temperatures(&options(None), dir.path()).unwrap(),
+            Some([2.23, 1.69, 5.0])
+        );
+        assert_eq!(
+            replacement_temperatures(&options(Some([1.0, 2.0, 3.0])), dir.path()).unwrap(),
+            Some([1.0, 2.0, 3.0])
+        );
+        assert!(replacement_temperatures(&options(Some([1.0, 2.0, 9.0])), dir.path()).is_err());
+    }
+
+    #[test]
+    fn a_replacement_drops_the_option_buckets() {
+        let mut config = LayaConfig::parse(
+            r#"{"temperature": [1.63, 1.25, 1.98],
+                "temperature_by_options": {"choice:3-5": 1.76, "noul:2": 1.98}}"#,
+        )
+        .unwrap();
+
+        config.replace_temperatures([2.23, 1.69, 5.0]);
+
+        let t = |qtype, k| Calibration::resolve_temperature(&config, qtype, k);
+        assert_eq!(t(crate::questions::QuestionType::Choice, 4), 2.23);
+        assert_eq!(t(crate::questions::QuestionType::Score, 3), 1.69);
+        assert_eq!(t(crate::questions::QuestionType::Noul, 2), 5.0);
+        assert!(config.temperature_by_options_raw.is_empty());
+    }
 
     #[test]
     fn a_null_state_is_refused_with_pythons_text() {
