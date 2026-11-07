@@ -628,7 +628,11 @@ impl LayaEngine {
                     });
                 let row_start = row * batch.marker_count;
                 let row_logits = &output.logits[row_start..row_start + batch.marker_count];
-                let p = Calibration::probabilities(row_logits, k, temperature);
+                // The row comes back in slot order; everything below indexes by option.
+                let p = crate::questions::unpermute_probabilities(
+                    Calibration::probabilities(row_logits, k, temperature),
+                    question.option_order(),
+                );
 
                 let act_start = row * n_act;
                 let act_row = &output.act_logits[act_start..act_start + n_act];

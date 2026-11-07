@@ -89,7 +89,11 @@ impl SequenceBuilder {
                 } else {
                     PythonJson::criterion(n.if_true())
                 };
-                vec![format!("false: {false_text}"), format!("true: {true_text}")]
+                let (false_label, true_label) = n.labels();
+                vec![
+                    format!("{false_label}: {false_text}"),
+                    format!("{true_label}: {true_text}"),
+                ]
             }
         }
     }
@@ -168,8 +172,12 @@ impl SequenceBuilder {
         );
         let mut header_ids: Vec<u32> = tokenizer.encode(&header_text)?;
 
+        // Slot `s` shows option `order[s]` (Python's `option_order`); the markers come back in
+        // slot order and the engine puts the probabilities back in option order.
+        let canonical: Vec<usize> = (0..options.len()).collect();
+        let order = question.option_order().unwrap_or(&canonical);
         let mut option_ids: Vec<Vec<u32>> = Vec::with_capacity(options.len());
-        for option in &options {
+        for option in order.iter().map(|&i| &options[i]) {
             let encoded = tokenizer.encode(&format!(" {}", Self::scrub(option, mask_token)))?;
             let take = Self::MAX_OPTION_TOKENS.min(encoded.len());
             let mut fragment = Vec::with_capacity(take + 1);

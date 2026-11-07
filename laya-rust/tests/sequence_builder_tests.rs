@@ -50,6 +50,53 @@ fn marker_positions_point_at_consecutive_option_fragments() {
 }
 
 #[test]
+fn option_order_shows_the_options_in_slot_order() {
+    let tok = StubTokenizer::new();
+    let q = Question::choice(
+        "h",
+        [
+            ("alpha", Value::Null),
+            ("beta", Value::Null),
+            ("gamma", Value::Null),
+        ],
+    )
+    .unwrap()
+    .with_option_order(vec![2, 0, 1])
+    .unwrap();
+
+    let (_, markers) = SequenceBuilder::build(&tok, &json!("s"), &q, 64, 32, false).unwrap();
+
+    // Encoded texts: the head, then the options slot by slot, then the state.
+    assert_eq!(&tok.encoded()[1..4], [" gamma", " alpha", " beta"]);
+    assert_eq!(3, markers.len());
+    assert_eq!(
+        laya::questions::unpermute_probabilities(vec![0.7, 0.2, 0.1], q.option_order()),
+        vec![0.2, 0.1, 0.7]
+    );
+}
+
+#[test]
+fn noul_labels_replace_the_false_and_true_words() {
+    let q = Question::noul("refund?", Value::Null, json!("a refund is requested"))
+        .with_noul_labels("B", "A")
+        .unwrap();
+
+    assert_eq!(
+        SequenceBuilder::render_options(&q),
+        vec![
+            "B: no, the statement does not hold".to_string(),
+            "A: a refund is requested".to_string()
+        ]
+    );
+    assert!(
+        Question::choice_labels("x", ["a"])
+            .unwrap()
+            .with_noul_labels("n", "y")
+            .is_err()
+    );
+}
+
+#[test]
 fn puts_the_type_name_in_the_head_text() {
     let tok = StubTokenizer::new();
     let q = Question::noul("does it hold", Value::Null, Value::Null);

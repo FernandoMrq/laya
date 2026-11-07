@@ -19,7 +19,8 @@ impl QuestionSet {
     /// * `score`: `criteria` is a non-empty list of levels, none of them null.
     /// * `noul`: `criteria` is omitted or an object keyed only `true` / `false` (any case).
     ///
-    /// The keys `labels` and `option_order` are not supported yet and are refused.
+    /// `option_order` (every type) and `labels` (noul only) are taken as Python takes them; see
+    /// [`Question::with_option_order`] and [`Question::with_noul_labels`].
     pub fn from_json(questions: &Value) -> Result<QuestionSet> {
         let Value::Object(map) = questions else {
             return Err(LayaError::InvalidQuestion(format!(
@@ -68,12 +69,48 @@ pub fn question_from_json(id: &str, definition: &Value) -> Result<Question> {
         "score" => score_from_json(instructions, criteria).map_err(fail)?,
         _ => noul_from_json(instructions, criteria).map_err(fail)?,
     };
-    for key in ["option_order", "labels"] {
-        if definition.contains_key(key) {
-            return Err(fail(format!("'{key}' is not supported by this port yet")));
+    let question = match definition.get("option_order") {
+        None => question,
+        Some(order) => {
+            let n = question.option_count();
+            let refuse = || {
+                fail(format!(
+                    "'option_order' must be a permutation of range({n}) -- one slot per option, \
+                     each option once -- got {order}"
+                ))
+            };
+            let slots = order
+                .as_array()
+                .ok_or_else(refuse)?
+                .iter()
+                .map(|slot| slot.as_u64().and_then(|s| usize::try_from(s).ok()))
+                .collect::<Option<Vec<usize>>>()
+                .ok_or_else(refuse)?;
+            question.with_option_order(slots).map_err(|_| refuse())?
+        }
+    };
+    match definition.get("labels") {
+        None => Ok(question),
+        Some(_) if qtype != "noul" => Err(fail(
+            "'labels' is only supported for noul questions".to_string(),
+        )),
+        Some(labels) => {
+            let refuse = || {
+                fail(
+                    "noul labels must map exactly 'false' and 'true' to distinct non-empty strings"
+                        .to_string(),
+                )
+            };
+            let map = labels
+                .as_object()
+                .filter(|m| m.len() == 2)
+                .ok_or_else(refuse)?;
+            let side = |key: &str| map.get(key).and_then(Value::as_str).ok_or_else(refuse);
+            question
+                .with_noul_labels(side("false")?, side("true")?)
+                .map_err(|_| refuse())
         }
     }
-    Ok(question)
 }
 
 fn checked_instructions(definition: &Map<String, Value>) -> std::result::Result<Value, String> {
@@ -286,5 +323,33 @@ mod tests {
             );
         }
         assert!(QuestionSet::from_json(&json!([])).is_err());
+    }
+
+    #[test]
+    fn noul_labels_and_option_order_are_taken_and_checked() {
+        let set = QuestionSet::from_json(&json!({
+            "refund": {"type": "noul", "instructions": "Refund?", "labels": {"false": " B ", "true": "A"}},
+            "team": {"type": "choice", "instructions": "Team?", "criteria": ["a", "b", "c"],
+                     "option_order": [2, 0, 1]}
+        }))
+        .unwrap();
+
+        assert_eq!(set["refund"].as_noul().unwrap().labels(), ("B", "A"));
+        assert_eq!(set["team"].option_order(), Some(&[2, 0, 1][..]));
+        let refused = [
+            json!({"type": "noul", "instructions": "x", "labels": {"false": "a", "true": "a"}}),
+            json!({"type": "noul", "instructions": "x", "labels": {"false": "a"}}),
+            json!({"type": "noul", "instructions": "x", "labels": {"false": "a", "true": "b", "maybe": "c"}}),
+            json!({"type": "choice", "instructions": "x", "criteria": ["a"], "labels": {"false": "a", "true": "b"}}),
+            json!({"type": "score", "instructions": "x", "criteria": ["a", "b"], "option_order": [0, 0]}),
+            json!({"type": "noul", "instructions": "x", "option_order": [0, 1, 2]}),
+            json!({"type": "noul", "instructions": "x", "option_order": [1, -0.5]}),
+        ];
+        for definition in refused {
+            assert!(
+                question_from_json("q", &definition).is_err(),
+                "{definition}"
+            );
+        }
     }
 }

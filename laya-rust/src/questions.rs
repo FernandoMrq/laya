@@ -48,6 +48,7 @@ impl TryFrom<i64> for QuestionType {
 pub struct ChoiceQuestion {
     instructions: Value,
     options: Vec<(String, Value)>,
+    option_order: Option<Vec<usize>>,
 }
 
 impl ChoiceQuestion {
@@ -73,6 +74,7 @@ impl ChoiceQuestion {
 pub struct ScoreQuestion {
     instructions: Value,
     levels: Vec<Value>,
+    option_order: Option<Vec<usize>>,
 }
 
 impl ScoreQuestion {
@@ -93,9 +95,21 @@ pub struct NoulQuestion {
     instructions: Value,
     if_false: Value,
     if_true: Value,
+    labels: Option<(String, String)>,
+    option_order: Option<Vec<usize>>,
 }
 
 impl NoulQuestion {
+    /// The words shown in front of the false and true options: `("false", "true")` unless
+    /// [`Question::with_noul_labels`] set others. Only the text the model reads changes; the
+    /// answer is still P(true). Ports `_resolve_noul_labels` (`laya/common.py`).
+    pub fn labels(&self) -> (&str, &str) {
+        match &self.labels {
+            Some((false_label, true_label)) => (false_label, true_label),
+            None => ("false", "true"),
+        }
+    }
+
     /// The prompt. See [`ChoiceQuestion::instructions`].
     pub fn instructions(&self) -> &Value {
         &self.instructions
@@ -200,6 +214,7 @@ impl Question {
         Ok(Question::Choice(ChoiceQuestion {
             instructions: instructions.into(),
             options: list,
+            option_order: None,
         }))
     }
 
@@ -230,6 +245,7 @@ impl Question {
         Ok(Question::Score(ScoreQuestion {
             instructions: instructions.into(),
             levels: list,
+            option_order: None,
         }))
     }
 
@@ -245,7 +261,94 @@ impl Question {
             instructions: instructions.into(),
             if_false: if_false.into(),
             if_true: if_true.into(),
+            labels: None,
+            option_order: None,
         })
+    }
+
+    /// How many options the question renders to: one per choice label or score level, and the
+    /// `[false, true]` pair for a noul. Ports `_option_count` (`laya/agent.py`).
+    pub fn option_count(&self) -> usize {
+        match self {
+            Question::Choice(c) => c.options.len(),
+            Question::Score(s) => s.levels.len(),
+            Question::Noul(_) => 2,
+        }
+    }
+
+    /// The slot order the options are shown in, when one was set: slot `s` shows option
+    /// `order[s]`. `None` is the canonical order.
+    pub fn option_order(&self) -> Option<&[usize]> {
+        match self {
+            Question::Choice(c) => c.option_order.as_deref(),
+            Question::Score(s) => s.option_order.as_deref(),
+            Question::Noul(n) => n.option_order.as_deref(),
+        }
+    }
+
+    /// Show the options in another order: slot `s` shows option `order[s]`. Answers still index
+    /// by option, so only what the model reads changes. Ports the `option_order` key of a
+    /// question definition (`Agent._check_question` and `build_head`, laya 0.4.6): anything but a
+    /// permutation of `0..option_count` is refused, since it would drop an option or show one
+    /// twice.
+    pub fn with_option_order(mut self, order: Vec<usize>) -> Result<Question> {
+        let n = self.option_count();
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        if sorted != (0..n).collect::<Vec<_>>() {
+            return Err(LayaError::InvalidQuestion(format!(
+                "'option_order' must be a permutation of range({n}) -- one slot per option, \
+                 each option once -- got {order:?}"
+            )));
+        }
+        let slot = match &mut self {
+            Question::Choice(c) => &mut c.option_order,
+            Question::Score(s) => &mut s.option_order,
+            Question::Noul(q) => &mut q.option_order,
+        };
+        *slot = Some(order);
+        Ok(self)
+    }
+
+    /// Word a noul's two options with other labels than `false` / `true`, as Python's `labels`
+    /// key does. Labels are trimmed and must be distinct and non-empty; only a noul takes them.
+    /// Ports `_resolve_noul_labels` (`laya/common.py`).
+    pub fn with_noul_labels(
+        mut self,
+        false_label: impl Into<String>,
+        true_label: impl Into<String>,
+    ) -> Result<Question> {
+        let Question::Noul(noul) = &mut self else {
+            return Err(LayaError::InvalidQuestion(
+                "'labels' is only supported for noul questions".to_string(),
+            ));
+        };
+        let false_label = false_label.into().trim().to_string();
+        let true_label = true_label.into().trim().to_string();
+        if false_label.is_empty() || true_label.is_empty() || false_label == true_label {
+            return Err(LayaError::InvalidQuestion(
+                "noul labels must map exactly 'false' and 'true' to distinct non-empty strings"
+                    .to_string(),
+            ));
+        }
+        noul.labels = Some((false_label, true_label));
+        Ok(self)
+    }
+}
+
+/// Puts a slot-ordered probability row back into option order: slot `s` showed option
+/// `order[s]`. A missing or mismatched order returns the row unchanged. Ports `unpermute_probs`
+/// (`laya/common.py`).
+pub fn unpermute_probabilities(p: Vec<f64>, order: Option<&[usize]>) -> Vec<f64> {
+    match order {
+        Some(order) if order.len() == p.len() => {
+            let mut canonical = vec![0.0; p.len()];
+            for (slot, &option) in order.iter().enumerate() {
+                canonical[option] = p[slot];
+            }
+            canonical
+        }
+        _ => p,
     }
 }
 
@@ -350,9 +453,15 @@ impl QuestionSet {
                         q.instructions.clone(),
                         q.if_false.clone(),
                         q.if_true.clone(),
+                        q.labels.as_ref().map_or(Value::Null, |(f, t)| {
+                            Value::from(vec![f.as_str(), t.as_str()])
+                        }),
                     ]),
                 };
-                Value::Array(vec![Value::from(id.as_str()), body])
+                let order = question
+                    .option_order()
+                    .map_or(Value::Null, |order| Value::from(order.to_vec()));
+                Value::Array(vec![Value::from(id.as_str()), body, order])
             })
             .collect();
         Value::Array(rows).to_string()
