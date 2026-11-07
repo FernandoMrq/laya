@@ -60,6 +60,7 @@ pub mod model_artifacts;
 pub mod predict_options;
 pub mod python_json;
 mod python_json_reader;
+pub mod question_json;
 pub mod questions;
 pub mod sequence_builder;
 pub mod tokenization;
@@ -94,6 +95,7 @@ pub use long_prediction::LongOptions;
 pub use model_artifacts::{ModelArtifacts, ModelLayout, ModelPaths};
 pub use predict_options::PredictOptions;
 pub use python_json::PythonJson;
+pub use question_json::question_from_json;
 pub use questions::{
     ChoiceQuestion, NoulQuestion, Question, QuestionSet, QuestionType, ScoreQuestion,
 };
