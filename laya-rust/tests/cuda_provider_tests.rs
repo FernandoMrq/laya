@@ -47,9 +47,9 @@ fn a_cuda_session_without_the_cuda_provider_fails() {
             build_session(&cpu, &model).is_ok(),
             "the copied runtime serves the CPU"
         );
-        let error = build_session(&options, &model)
-            .err()
-            .expect("a CUDA session without the CUDA provider must fail, not fall back");
+        let Err(error) = build_session(&options, &model) else {
+            panic!("a CUDA session without the CUDA provider must fail, not fall back");
+        };
         eprintln!("refused as expected: {error}");
         return;
     }
